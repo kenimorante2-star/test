@@ -1819,6 +1819,9 @@ app.get('/bookings/user/:userId', verifyClerkToken, async (req, res) => {
                     paymentStatus = 'Partial';
                 }
             }
+            const balance = isNaN(parsedTotalPrice) || isNaN(parsedAmountPaid)
+                ? 0
+                : Math.max(0, parsedTotalPrice - parsedAmountPaid);
             const latestRef = latestRefsMap.get(booking.id);
             return {
                 id: booking.id,
@@ -1837,6 +1840,7 @@ app.get('/bookings/user/:userId', verifyClerkToken, async (req, res) => {
                 isPaid: paymentStatus === 'Fully Paid',
                 paymentStatus,
                 amountPaid: parsedAmountPaid,
+                balance,
                 guests: booking.guests,
                 status: booking.status,
                 assigned_room_number: booking.assigned_room_number,
@@ -2034,7 +2038,11 @@ app.patch('/admin/bookings/:id/reject-payment-reference', verifyClerkToken, requ
             [note || 'Reference number invalid', bookingId]
         );
 
-        // Keep booking.payment_reference for visibility; guest can resubmit
+        // Also clear payment_reference on the booking so the field appears empty to both admin and guest
+        await bookingDb.execute(
+            `UPDATE bookings SET payment_reference = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [bookingId]
+        );
 
         if (updateResult.affectedRows === 0) {
             return res.status(400).json({ error: 'No pending payment reference to reject.' });
