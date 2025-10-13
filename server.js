@@ -202,6 +202,39 @@ async function initDbs() {
 
 initDbs();
 
+// Ensure auxiliary tables exist (e.g., payment references)
+async function ensureAuxTables() {
+    try {
+        // History and workflow for user-submitted payment references
+        await bookingDb.execute(`
+            CREATE TABLE IF NOT EXISTS payment_references (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id INT NOT NULL,
+                user_id VARCHAR(255) NOT NULL,
+                reference_number VARCHAR(255) NOT NULL,
+                claimed_amount DECIMAL(10,2) DEFAULT NULL,
+                status ENUM('pending','rejected','verified') NOT NULL DEFAULT 'pending',
+                note TEXT NULL,
+                verified_amount DECIMAL(10,2) DEFAULT NULL,
+                verified_by VARCHAR(255) DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                verified_at TIMESTAMP NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('Ensured table payment_references exists');
+    } catch (tableErr) {
+        console.error('Failed creating auxiliary tables:', tableErr);
+    }
+}
+
+// Fire-and-forget; runs after DBs are initialized
+setTimeout(() => {
+    if (bookingDb) {
+        ensureAuxTables();
+    }
+}, 1000);
+
 //=====================================================================
 //REAL TIME PROCESSING DITO EMIT-REALTIME-UPDATE
 //======================================================================
@@ -1751,6 +1784,25 @@ app.get('/bookings/user/:userId', verifyClerkToken, async (req, res) => {
         }));
         console.log("[SERVER] Constructed Rooms Map:", roomsMap);
 
+        // Fetch latest non-verified payment reference per booking (pending or rejected)
+        const bookingIds = bookings.map(b => b.id);
+        let latestRefsMap = new Map();
+        if (bookingIds.length > 0) {
+            const placeholders = bookingIds.map(() => '?').join(',');
+            const [latestRefs] = await bookingDb.query(
+                `SELECT pr.*
+                 FROM payment_references pr
+                 JOIN (
+                    SELECT booking_id, MAX(id) AS max_id
+                    FROM payment_references
+                    WHERE booking_id IN (${placeholders}) AND status IN ('pending','rejected')
+                    GROUP BY booking_id
+                 ) t ON t.max_id = pr.id`,
+                bookingIds
+            );
+            latestRefsMap = new Map(latestRefs.map(r => [r.booking_id, r]));
+        }
+
         const processedBookings = bookings.map(booking => {
             const roomDetails = roomsMap.get(booking.roomId);
 
@@ -1767,6 +1819,7 @@ app.get('/bookings/user/:userId', verifyClerkToken, async (req, res) => {
                     paymentStatus = 'Partial';
                 }
             }
+            const latestRef = latestRefsMap.get(booking.id);
             return {
                 id: booking.id,
                 userId: booking.userId,
@@ -1793,6 +1846,10 @@ app.get('/bookings/user/:userId', verifyClerkToken, async (req, res) => {
                 actualCheckOutTime: booking.actual_check_out_time,
                 actualPaymentTime: booking.actualPaymentTime,
                 paymentReference: booking.payment_reference || null,
+                pendingReferenceNumber: latestRef ? latestRef.reference_number : null,
+                pendingReferenceStatus: latestRef ? latestRef.status : null,
+                pendingReferenceNote: latestRef ? latestRef.note : null,
+                claimedAmount: latestRef && latestRef.claimed_amount != null ? parseFloat(latestRef.claimed_amount) : null,
                 userRating: userRating
             };
         });
@@ -1911,7 +1968,7 @@ app.patch('/admin/bookings/:id/pay-in-cash', verifyClerkToken, requireAdmin, asy
 app.patch('/bookings/:id/mark-paid', verifyClerkToken, async (req, res) => {
     const bookingId = req.params.id;
     const { userId } = req.auth; // Get userId from Clerk auth
-    const { referenceNumber } = req.body || {};
+    const { referenceNumber, amount } = req.body || {};
 
     try {
         const [bookingRows] = await bookingDb.execute(
@@ -1930,24 +1987,64 @@ app.patch('/bookings/:id/mark-paid', verifyClerkToken, async (req, res) => {
             return res.status(400).json({ error: 'Only approved bookings can be marked as paid' });
         }
 
-        // Update booking to paid
+        // Save or upsert payment reference submission (pending verification)
+        await bookingDb.execute(
+            `INSERT INTO payment_references (booking_id, user_id, reference_number, claimed_amount, status)
+             VALUES (?, ?, ?, ?, 'pending')`,
+            [bookingId, userId, referenceNumber || '', amount ? parseFloat(amount) : null]
+        );
+
+        // Also store reference on booking for quick admin view
         await bookingDb.execute(
             `UPDATE bookings SET payment_reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [referenceNumber || null, bookingId]
         );
-         res.json({ message: 'Payment reference submitted for verification.' });
+
+        res.json({ message: 'Payment reference submitted for verification.' });
 
         // Optional: notify admins that a new payment reference was submitted
         emitRealtimeUpdate('paymentReferenceSubmitted', {
             id: bookingId,
             userId: booking.userId,
             paymentReference: referenceNumber || null,
+            claimedAmount: amount ? parseFloat(amount) : null,
             updatedAt: new Date().toISOString()
         });
 
     } catch (err) {
        console.error("[SERVER] Error submitting payment reference:", err);
         res.status(500).json({ error: err.message || 'Failed to submit payment reference' });
+    }
+});
+
+// Admin: Reject a submitted payment reference with a note shown to guest
+app.patch('/admin/bookings/:id/reject-payment-reference', verifyClerkToken, requireAdmin, async (req, res) => {
+    const bookingId = req.params.id;
+    const { note } = req.body || {};
+    try {
+        const [exists] = await bookingDb.execute('SELECT id FROM bookings WHERE id = ?', [bookingId]);
+        if (exists.length === 0) {
+            return res.status(404).json({ error: 'Booking not found.' });
+        }
+
+        // Update the latest pending reference to rejected with note
+        const [updateResult] = await bookingDb.execute(
+            `UPDATE payment_references SET status = 'rejected', note = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE booking_id = ? AND status = 'pending'`,
+            [note || 'Reference number invalid', bookingId]
+        );
+
+        // Keep booking.payment_reference for visibility; guest can resubmit
+
+        if (updateResult.affectedRows === 0) {
+            return res.status(400).json({ error: 'No pending payment reference to reject.' });
+        }
+
+        emitRealtimeUpdate('paymentReferenceRejected', { id: bookingId, note: note || null });
+        res.json({ message: 'Payment reference rejected.' });
+    } catch (err) {
+        console.error('Error rejecting payment reference:', err);
+        res.status(500).json({ error: err.message || 'Failed to reject payment reference.' });
     }
 });
 
@@ -2521,8 +2618,15 @@ app.patch('/admin/bookings/:id/record-payment', verifyClerkToken, requireAdmin, 
         console.log(`[💾] Updating booking... New AmountPaid: ${newAmountPaid.toFixed(2)}, Status: ${paymentStatusForLog}`);
 
         await bookingDb.execute(
-            'UPDATE bookings SET amountPaid = ?, isPaid = ?, actualPaymentTime = NOW() WHERE id = ?',
+            'UPDATE bookings SET amountPaid = ?, isPaid = ?, actualPaymentTime = NOW(), payment_reference = NULL WHERE id = ?',
             [newAmountPaid.toFixed(2), isFullyPaid, bookingId]
+        );
+
+        // Mark any pending reference rows as verified and store verified amount
+        await bookingDb.execute(
+            `UPDATE payment_references SET status = 'verified', verified_amount = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP
+             WHERE booking_id = ? AND status = 'pending'`,
+            [newAmountPaid.toFixed(2), req.auth?.userId || null, bookingId]
         );
 
         const [updated] = await bookingDb.execute('SELECT * FROM bookings WHERE id = ?', [bookingId]);
@@ -2698,11 +2802,17 @@ app.get('/admin/bookings', verifyClerkToken, requireAdmin, async (req, res) => {
                 b.actual_check_out_time,
                 b.actualPaymentTime,
                 b.payment_reference,
-                pr.room_number AS physical_room_number_from_pr
+                pr.room_number AS physical_room_number_from_pr,
+                prf.reference_number AS pending_reference_number,
+                prf.claimed_amount AS pending_claimed_amount,
+                prf.status AS pending_reference_status,
+                prf.note AS pending_reference_note
             FROM
                 bookings b
             LEFT JOIN
                 room_management_db.physical_rooms pr ON b.physical_room_id = pr.id
+            LEFT JOIN
+                payment_references prf ON prf.booking_id = b.id AND prf.status = 'pending'
             ORDER BY
                 b.id DESC`
         );
@@ -2861,6 +2971,10 @@ app.get('/admin/bookings', verifyClerkToken, requireAdmin, async (req, res) => {
         actualCheckOutTime: booking.actual_check_out_time,
         actualPaymentTime: booking.actualPaymentTime,
         paymentReference: booking.payment_reference || null,
+        claimedAmount: booking.pending_claimed_amount !== null ? parseFloat(booking.pending_claimed_amount) : null,
+        pendingReferenceNumber: booking.pending_reference_number || null,
+        pendingReferenceStatus: booking.pending_reference_status || null,
+        pendingReferenceNote: booking.pending_reference_note || null,
         isApproachingCheckout,
         isOverdue
     };
@@ -3328,11 +3442,14 @@ app.get('/admin/checked-out-bookings', verifyClerkToken, requireAdmin, async (re
                     b.actual_check_in_time, b.actual_check_out_time,   
                     u.first_name, u.last_name, u.email, u.phone_number, u.id_picture_url AS idPictureUrl,
                     r.roomType, r.pricePerNight AS roomPrice, -- Added roomPrice for online bookings
-                    pr.room_number AS physicalRoomNumber
+                    pr.room_number AS physicalRoomNumber,
+                    prf.reference_number AS paymentReference,
+                    prf.claimed_amount AS claimedAmount
                 FROM bookings b
                 LEFT JOIN user_db.users u ON b.userId = u.clerk_user_id
                 LEFT JOIN room_management_db.rooms r ON b.roomId = r.id
                 LEFT JOIN room_management_db.physical_rooms pr ON b.physical_room_id = pr.id
+                LEFT JOIN payment_references prf ON prf.booking_id = b.id AND prf.status = 'verified'
                 WHERE ${baseQueryOnline} ${searchSqlOnline}
                 ORDER BY b.checkOutDate DESC
                 LIMIT ? OFFSET ?`,
@@ -3378,6 +3495,8 @@ app.get('/admin/checked-out-bookings', verifyClerkToken, requireAdmin, async (re
                 roomType: row.roomType,
                 roomPrice: row.roomPrice,
                 physicalRoomNumber: row.physicalRoomNumber,
+                paymentReference: row.paymentReference,
+                claimedAmount: row.claimedAmount,
                 status: 'checked_out', // Ensure status is set for online bookings
             }));
         }
