@@ -522,10 +522,13 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
     const handleShowDetails = (booking) => {
         // Calculate nights based on check-in and check-out
-        const checkIn = new Date(booking.checkInDate);
-        const checkOut = new Date(booking.checkOutDate);
-        const durationInHours = differenceInHours(checkOut, checkIn);
-        const calculatedNights = durationInHours >= 22 ? Math.ceil(durationInHours / 24) : 1;
+        const checkIn = parseMySQLDateTimeToLocal(booking.checkInDate || booking.checkInDateAndTime);
+        const checkOut = parseMySQLDateTimeToLocal(booking.checkOutDate || booking.checkOutDateAndTime);
+        let calculatedNights = 1;
+        if (checkIn && checkOut) {
+            const durationInHours = differenceInHours(checkOut, checkIn);
+            calculatedNights = durationInHours >= 22 ? Math.ceil(durationInHours / 24) : 1;
+        }
 
         // Add calculated nights to booking object
         const bookingWithNights = {
@@ -657,7 +660,7 @@ const handleCloseVerifyPayment = () => {
     // Online Booking Extend Handlers
     const handleExtendBookingClick = (booking) => {
         setCurrentBookingToExtend(booking);
-        const currentCheckout = new Date(booking.checkOutDate);
+        const currentCheckout = parseMySQLDateTimeToLocal(booking.checkOutDate || booking.checkOutDateAndTime) || new Date();
         currentCheckout.setDate(currentCheckout.getDate() + 1);
         setNewExtendCheckOutDate(currentCheckout.toISOString().split('T')[0]);
         setIsExtendModalOpen(true);
@@ -675,7 +678,7 @@ const handleCloseVerifyPayment = () => {
             return;
         }
 
-        const oldCheckOutDate = new Date(currentBookingToExtend.checkOutDate);
+        const oldCheckOutDate = parseMySQLDateTimeToLocal(currentBookingToExtend.checkOutDate || currentBookingToExtend.checkOutDateAndTime) || new Date(0);
         const newDate = new Date(newExtendCheckOutDate);
 
         if (newDate <= oldCheckOutDate) {
@@ -822,12 +825,12 @@ const handleCloseVerifyPayment = () => {
 
      const handlePrintOnlineBookingReceipt = (booking) => {
         // Calculate nights using the same logic as the backend for consistency
-        const checkInDateObj = new Date(booking.checkInDate);
-        const checkOutDateObj = new Date(booking.checkOutDate);
+        const checkInDateObj = parseMySQLDateTimeToLocal(booking.checkInDate || booking.checkInDateAndTime);
+        const checkOutDateObj = parseMySQLDateTimeToLocal(booking.checkOutDate || booking.checkOutDateAndTime);
 
         
         let nights = 'N/A';
-        const durationInHours = differenceInHours(checkOutDateObj, checkInDateObj);
+        const durationInHours = (checkInDateObj && checkOutDateObj) ? differenceInHours(checkOutDateObj, checkInDateObj) : 0;
         if (durationInHours >= 22) {
         nights = Math.ceil(durationInHours / 24); // Round up to count full days
         }
@@ -1073,6 +1076,7 @@ const handleCloseVerifyPayment = () => {
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room Type</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room No.</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check-in Date/Time</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Late Check-out Fee</th> {/* NEW COLUMN */}
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
@@ -1084,7 +1088,7 @@ const handleCloseVerifyPayment = () => {
             <tbody className="bg-white divide-y divide-gray-200">
                     {activeOnlineBookings.map((booking) =>  { // Added defensive check
                     // Calculate number of nights and room price for display
-                    const checkOutDateObj = new Date(booking.checkOutDate);
+                    const checkOutDateObj = parseMySQLDateTimeToLocal(booking.checkOutDate || booking.checkOutDateAndTime) || new Date(0);
 
                     // Determine if the booking is overdue:
                     // It must be past its checkout date AND its status must be 'approved'.
@@ -1107,6 +1111,7 @@ const handleCloseVerifyPayment = () => {
                             </td>
                             <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.room.roomType}</td>
                             <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.physicalRoomNumber || 'N/A'}</td> {/* Changed to physicalRoomNumber */}
+                            <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{formatLocalDateTime(booking.actualCheckInTime || booking.checkInDate)}</td>
                             <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">₱{parseFloat(booking.lateCheckOutFee || 0).toFixed(2)}</td> {/* Display Late Check-out Fee */}
                             <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">₱{booking.totalPrice.toFixed(2)}</td>
                             <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">
@@ -1474,7 +1479,7 @@ const handleCloseVerifyPayment = () => {
                             Booking ID: <strong>{currentBookingToExtend.id}</strong>
                         </p>
                         <p className="mb-4">
-                            Current Check-out: <strong>{new Date(currentBookingToExtend.checkOutDate).toLocaleDateString()}</strong>
+                            Current Check-out: <strong>{parseMySQLDateTimeToLocal(currentBookingToExtend.checkOutDate || currentBookingToExtend.checkOutDateAndTime)?.toLocaleDateString() || 'N/A'}</strong>
                         </p>
                         <label htmlFor="newCheckoutDate" className="block text-xs font-medium text-gray-700 mb-2">
                             New Check-out Date:
@@ -1485,7 +1490,13 @@ const handleCloseVerifyPayment = () => {
                             value={newExtendCheckOutDate}
                             onChange={(e) => setNewExtendCheckOutDate(e.target.value)}
                             className="mt-1 block w-full border border-gray-300 rounded-md shadow-xs p-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            min={new Date(new Date(currentBookingToExtend.checkOutDate).setDate(new Date(currentBookingToExtend.checkOutDate).getDate() + 1)).toISOString().split('T')[0]}
+                            min={(function(){
+                                const base = parseMySQLDateTimeToLocal(currentBookingToExtend.checkOutDate || currentBookingToExtend.checkOutDateAndTime);
+                                if (!base) return '';
+                                const next = new Date(base);
+                                next.setDate(next.getDate() + 1);
+                                return next.toISOString().split('T')[0];
+                            })()}
                         />
                         <div className="flex justify-end gap-3 mt-6">
                             <button
