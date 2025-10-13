@@ -2509,21 +2509,21 @@ app.patch('/admin/bookings/:id/record-payment', verifyClerkToken, requireAdmin, 
         const current = rows[0];
         console.log(`[✅] Booking Found. Current Paid: ${current.amountPaid}, Total: ${current.totalPrice}`);
 
-        const newAmountPaid = parseFloat(current.amountPaid) + parseFloat(amountPaid);
+         const currentAmountPaid = parseFloat(current.amountPaid || 0);
+        const additionalAmount = parseFloat(amountPaid);
+        const newAmountPaid = currentAmountPaid + additionalAmount;
         const totalPrice = parseFloat(current.totalPrice);
 
-        let isPaidStatus = 'Not Paid';
-        if (newAmountPaid >= totalPrice) {
-            isPaidStatus = 'Fully Paid';
-        } else if (newAmountPaid > 0) {
-            isPaidStatus = 'Partial';
-        }
+        // Persist isPaid as integer (0/1) for online bookings schema
+        const isFullyPaid = newAmountPaid >= totalPrice ? 1 : 0;
+        const paymentStatusForLog = isFullyPaid ? 'Fully Paid' : (newAmountPaid > 0 ? 'Partial' : 'Not Paid');
 
-        console.log(`[💾] Updating booking... New AmountPaid: ${newAmountPaid}, Status: ${isPaidStatus}`);
+
+        console.log(`[💾] Updating booking... New AmountPaid: ${newAmountPaid.toFixed(2)}, Status: ${paymentStatusForLog}`);
 
         await bookingDb.execute(
             'UPDATE bookings SET amountPaid = ?, isPaid = ?, actualPaymentTime = NOW() WHERE id = ?',
-            [newAmountPaid.toFixed(2), isPaidStatus, bookingId]
+            [newAmountPaid.toFixed(2), isFullyPaid, bookingId]
         );
 
         const [updated] = await bookingDb.execute('SELECT * FROM bookings WHERE id = ?', [bookingId]);
