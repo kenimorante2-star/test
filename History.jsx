@@ -19,6 +19,42 @@ const History = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedBookingDetails, setSelectedBookingDetails] = useState(null);
 
+  // Robust local datetime formatter for MySQL DATETIME strings
+  const parseMySQLDateTimeToLocal = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) return isNaN(value) ? null : value;
+    if (typeof value !== 'string') return null;
+
+    const trimmed = value.trim();
+    let normalized = trimmed
+      .replace('T', ' ')
+      .replace(/[zZ]$/, '')
+      .replace(/([+-]\d{2}:?\d{2})$/, '')
+      .trim();
+
+    const [datePartRaw, timePartRaw] = normalized.split(' ');
+    if (!datePartRaw) return null;
+    const [yStr, mStr, dStr] = datePartRaw.split('-');
+    const year = parseInt(yStr, 10);
+    const month = parseInt(mStr, 10) - 1;
+    const day = parseInt(dStr, 10);
+    let hours = 0, minutes = 0, seconds = 0;
+    if (timePartRaw) {
+      const timeMain = timePartRaw.split('.')[0];
+      const [hStr = '0', minStr = '0', sStr = '0'] = timeMain.split(':');
+      hours = parseInt(hStr, 10) || 0;
+      minutes = parseInt(minStr, 10) || 0;
+      seconds = parseInt(sStr, 10) || 0;
+    }
+    const local = new Date(year, month, day, hours, minutes, seconds, 0);
+    return isNaN(local) ? null : local;
+  };
+
+  const formatLocalDateTime = (value) => {
+    const d = parseMySQLDateTimeToLocal(value);
+    return d ? d.toLocaleString() : 'N/A';
+  };
+
   const fetchHistoryBookings = useCallback(async () => {
     if (!isLoaded || !isSignedIn) {
       setLoading(false);
@@ -100,9 +136,9 @@ const History = () => {
     // Calculate nights based on the original booking dates
     let nights = booking.nights;
     if (booking.checkInDate && booking.checkOutDate) {
-      const start = new Date(booking.checkInDate);
-      const end = new Date(booking.checkOutDate);
-      if (!isNaN(start) && !isNaN(end)) {
+      const start = parseMySQLDateTimeToLocal(booking.checkInDate);
+      const end = parseMySQLDateTimeToLocal(booking.checkOutDate);
+      if (start && end) {
         nights = differenceInDays(end, start);
       }
     }
@@ -116,8 +152,8 @@ const History = () => {
     
     // Helper function to format date or show "N/A"
     const formatDate = (dateValue) => {
-      const date = new Date(dateValue);
-      return !isNaN(date) ? date.toLocaleString() : 'N/A';
+      const date = parseMySQLDateTimeToLocal(dateValue);
+      return date ? date.toLocaleString() : 'N/A';
     };
 
     // Use actual check-in/out times for display with fallback
@@ -255,10 +291,10 @@ const History = () => {
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.roomType}</td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.physicalRoomNumber || 'N/A'}</td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">
-                        {new Date(booking.checkInDate).toLocaleDateString()}
+                        {parseMySQLDateTimeToLocal(booking.checkInDate)?.toLocaleDateString() || 'N/A'}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">
-                        {new Date(booking.checkOutDate).toLocaleDateString()}
+                        {parseMySQLDateTimeToLocal(booking.checkOutDate)?.toLocaleDateString() || 'N/A'}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">₱{parseFloat(booking.totalPrice).toFixed(2)}</td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.paymentReference || '—'}</td>
@@ -329,17 +365,18 @@ const History = () => {
                 <p><strong>Status:</strong> {selectedBookingDetails.status}</p>
                 <p><strong>Guests:</strong> {selectedBookingDetails.guests}</p>
                 <p>
-                    <strong>Check-in:</strong> {selectedBookingDetails.actual_check_in_time 
-                        ? new Date(selectedBookingDetails.actual_check_in_time).toLocaleString()
-                        : new Date(selectedBookingDetails.checkInDate).toLocaleString()}
+                    <strong>Check-in:</strong> {formatLocalDateTime(selectedBookingDetails.actual_check_in_time || selectedBookingDetails.checkInDate)}
                 </p>
                 <p>
-                    <strong>Check-out:</strong> {selectedBookingDetails.actual_check_out_time
-                        ? new Date(selectedBookingDetails.actual_check_out_time).toLocaleString()
-                        : new Date(selectedBookingDetails.checkOutDate).toLocaleString()}
+                    <strong>Check-out:</strong> {formatLocalDateTime(selectedBookingDetails.actual_check_out_time || selectedBookingDetails.checkOutDate)}
                 </p>
                 <p><strong>Nights:</strong> {selectedBookingDetails.nights !== null ? selectedBookingDetails.nights :
-                    (differenceInDays(new Date(selectedBookingDetails.checkOutDate), new Date(selectedBookingDetails.checkInDate)) || 'N/A')}
+                    (function(){
+                      const start = parseMySQLDateTimeToLocal(selectedBookingDetails.checkInDate);
+                      const end = parseMySQLDateTimeToLocal(selectedBookingDetails.checkOutDate);
+                      if (!start || !end) return 'N/A';
+                      return differenceInDays(end, start) || 'N/A';
+                    })()}
                 </p>
               </div>
 
