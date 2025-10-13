@@ -91,6 +91,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
     const [verifyAmount, setVerifyAmount] = useState('');
     const [verifyError, setVerifyError] = useState(null);
     const [verifyingPayment, setVerifyingPayment] = useState(false);
+    const [rejectNote, setRejectNote] = useState('');
     
     // Robust local datetime formatter for MySQL DATETIME strings
     // Ensures strings like 'YYYY-MM-DD HH:mm:ss' are treated as local time
@@ -1941,7 +1942,10 @@ const handleCloseVerifyPayment = () => {
                 <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
                     <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
                         <h3 className="text-lg font-semibold mb-4">Verify Payment for Booking #{verifyPaymentFor.id}</h3>
-                        <p className="mb-2 text-sm">Reference: <strong>{verifyPaymentFor.paymentReference || '—'}</strong></p>
+                        <p className="mb-2 text-sm">Reference: <strong>{verifyPaymentFor.paymentReference || verifyPaymentFor.pendingReferenceNumber || '—'}</strong></p>
+                        {verifyPaymentFor.claimedAmount !== null && verifyPaymentFor.claimedAmount !== undefined && (
+                          <p className="mb-2 text-sm">Claimed Amount: <strong>₱{parseFloat(verifyPaymentFor.claimedAmount).toFixed(2)}</strong></p>
+                        )}
                         <p className="mb-2 text-sm">Total Price: <strong>₱{parseFloat(verifyPaymentFor.totalPrice || 0).toFixed(2)}</strong></p>
                         <p className="mb-4 text-sm">Amount Already Paid: <strong>₱{parseFloat(verifyPaymentFor.amountPaid || 0).toFixed(2)}</strong></p>
 
@@ -1959,6 +1963,20 @@ const handleCloseVerifyPayment = () => {
                             step="0.01"
                         />
                         {verifyError && <p className="text-red-500 text-sm mt-2">{verifyError}</p>}
+                        
+                        <div className="mt-4">
+                            <label htmlFor="rejectNote" className="block text-sm font-medium text-gray-700 mb-2">
+                                Rejection note (visible to guest)
+                            </label>
+                            <input
+                                type="text"
+                                id="rejectNote"
+                                value={rejectNote}
+                                onChange={(e) => setRejectNote(e.target.value)}
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-red-500 focus:border-red-500"
+                                placeholder="e.g., Wrong reference number"
+                            />
+                        </div>
 
                         <div className="flex justify-end gap-3 mt-6">
                             <button
@@ -1967,6 +1985,27 @@ const handleCloseVerifyPayment = () => {
                                 className="px-5 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-200 ease-in-out"
                             >
                                 Cancel
+                            </button>
+                             <button
+                                type="button"
+                                onClick={async () => {
+                                    try {
+                                        const token = await getToken();
+                                        await axios.patch(`${BACKEND_URL}/admin/bookings/${verifyPaymentFor.id}/reject-payment-reference`, { note: rejectNote || '' }, {
+                                            headers: { Authorization: `Bearer ${token}` }
+                                        });
+                                        alert('Payment reference rejected.');
+                                        fetchBookings();
+                                        handleCloseVerifyPayment();
+                                    } catch (err) {
+                                        console.error('Failed to reject payment reference:', err.response?.data || err.message);
+                                        setVerifyError(err.response?.data?.error || 'Failed to reject payment reference.');
+                                    }
+                                }}
+                                className="px-5 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200 ease-in-out"
+                                disabled={verifyingPayment}
+                            >
+                                Reject
                             </button>
                             <button
                                 type="button"
