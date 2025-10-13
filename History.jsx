@@ -240,6 +240,8 @@ const History = () => {
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check-in Date</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check-out Date</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Price</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference #</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th> {/* NEW COLUMN */}
               </tr>
             </thead>
@@ -259,6 +261,8 @@ const History = () => {
                         {new Date(booking.checkOutDate).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">₱{parseFloat(booking.totalPrice).toFixed(2)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.paymentReference || '—'}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-900">{booking.claimedAmount !== null && booking.claimedAmount !== undefined ? `₱${parseFloat(booking.claimedAmount).toFixed(2)}` : '—'}</td>
                     <td className="px-4 py-2 whitespace-nowrap text-center text-xs font-medium">
                         
                         <button
