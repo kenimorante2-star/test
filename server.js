@@ -2093,7 +2093,7 @@ app.post('/check-availability', async (req, res) => {
         );
         const availableRoomsTotal = parseInt(availableRoomsCountResult[0].availableRooms, 10) || 0;
 
-        if (availableRoomsTotal === 0) {
+         if (availableRoomsTotal === 0) {
             return res.json({ available: false, message: 'No rooms available for this room type at the moment.' });
         }
 
@@ -2126,7 +2126,7 @@ app.post('/check-availability', async (req, res) => {
         );
         const bookedPhysicalRooms = bookedRoomsResult[0].bookedCount;
 
-        console.log(`Total Physical Rooms for type ${roomId}: ${totalPhysicalRooms}`);
+        console.log(`Available Physical Rooms for type ${roomId}: ${availableRoomsTotal}`);
         console.log(`Physical Rooms Booked for requested dates: ${bookedPhysicalRooms}`);
 
         // 3. Calculate actual available physical rooms
