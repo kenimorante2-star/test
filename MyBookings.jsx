@@ -1,6 +1,6 @@
 // src/pages/User/MyBookings.jsx
 import React, { useEffect, useState, useCallback } from 'react';
-import { differenceInDays } from 'date-fns';
+import { differenceInCalendarDays } from 'date-fns';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { assets } from '../assets/assets'; // Adjust path if necessary
@@ -292,11 +292,16 @@ const MyBookings = () => {
                                     : `${BACKEND_URL}/uploads/room_images/${firstImg}`))
                             : assets.placeholder_room_image;
 
-                        const startForNights = booking.checkInDateAndTime || booking.checkInDate;
-                        const endForNights = booking.checkOutDateAndTime || booking.checkOutDate;
+                        // Prefer date-only fields to compute nights; fall back to datetime
+                        const startForNights = booking.checkInDate || booking.checkInDateAndTime;
+                        const endForNights = booking.checkOutDate || booking.checkOutDateAndTime;
                         const computedNights = (startForNights && endForNights)
-                            ? differenceInDays(new Date(endForNights), new Date(startForNights))
+                            ? differenceInCalendarDays(new Date(endForNights), new Date(startForNights))
                             : (typeof booking.nights === 'number' ? booking.nights : null);
+
+                        // Dates for display
+                        const displayCheckIn = booking.checkInDate || booking.checkInDateAndTime;
+                        const displayCheckOut = booking.checkOutDate || booking.checkOutDateAndTime;
 
                         return (
                             <div key={booking.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
@@ -311,11 +316,11 @@ const MyBookings = () => {
                                     
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-calendar-alt mr-2"></i>
-                                        Check-in: {new Date(booking.checkInDateAndTime).toLocaleDateString()}
+                                        Check-in: {displayCheckIn ? new Date(displayCheckIn).toLocaleDateString() : 'N/A'}
                                     </p>
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-calendar-alt mr-2"></i>
-                                        Check-out: {new Date(booking.checkOutDateAndTime).toLocaleDateString()}
+                                        Check-out: {displayCheckOut ? new Date(displayCheckOut).toLocaleDateString() : 'N/A'}
                                     </p>
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-moon mr-2"></i>
