@@ -1229,15 +1229,15 @@ app.post('/bookings/walk-in', verifyClerkToken, requireAdmin, uploadIdPicture.si
         const totalCalculatedPrice = parseFloat(frontendCalculatedTotalPrice);
 
         // Determine isPaid status based on amountPaid and totalPrice
-        let isPaidStatusInteger; // Use a new variable name for clarity
-        let paymentStatusText; // Keep the string status for internal logic/other columns if needed
-
-        if (updatedAmountPaid >= totalPrice) {
-            isPaidStatusInteger = 1; // Correct: Use integer 1 for Fully Paid (True)
-            paymentStatusText = 'Fully Paid'; 
+        // Determine isPaid status based on amountPaid and totalCalculatedPrice
+        const amountPaidNum = parseFloat(amountPaid || 0);
+        let isPaidStatus;
+        if (!isNaN(amountPaidNum) && amountPaidNum >= totalCalculatedPrice) {
+            isPaidStatus = 'Fully Paid';
+        } else if (!isNaN(amountPaidNum) && amountPaidNum > 0) {
+            isPaidStatus = 'Partial';
         } else {
-            isPaidStatusInteger = 0; // Correct: Use integer 0 for Partial/Not Paid (False)
-            paymentStatusText = updatedAmountPaid > 0 ? 'Partial' : 'Not Paid';
+            isPaidStatus = 'Not Paid';
         }
         // Set initial booking status for walk-in to 'Checked-In'
         const initialStatus = 'Checked-In';
@@ -1286,7 +1286,7 @@ app.post('/bookings/walk-in', verifyClerkToken, requireAdmin, uploadIdPicture.si
             earlyCheckInFee: earlyCheckInFee || 0,
             guests,
             actualCheckInTime,
-            status: 'confirmed',
+            status: initialStatus,
             roomPrice: calculatedRoomPrice,
             nights: numberOfNights,
             idPictureUrl: idPictureUrl,
