@@ -1394,7 +1394,7 @@ app.patch('/admin/bookings/walk-in/:id/record-payment', verifyClerkToken, requir
 // PATCH route to extend a booking
 app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { nightsToExtend, paymentAmount } = req.body;
+    const { nightsToExtend, paymentAmount, discountType: overrideDiscountType } = req.body;
 
     if (nightsToExtend === undefined || nightsToExtend <= 0 || isNaN(parseInt(nightsToExtend))) {
         return res.status(400).json({ error: 'Valid number of nights to extend is required.' });
@@ -1411,6 +1411,8 @@ app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, 
                 wb.totalPrice,
                 wb.amountPaid,
                 wb.nights,
+                wb.discount_type,
+                wb.discount_amount,
                 r.pricePerNight
             FROM
                 bookings wb
@@ -1430,17 +1432,29 @@ app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, 
         const currentAmountPaid = parseFloat(existingBooking.amountPaid || 0);
         const currentNights = parseInt(existingBooking.nights || 0);
         const pricePerNight = parseFloat(existingBooking.pricePerNight || 0);
+        // Use provided discount type for this extension if sent; otherwise fallback to existing
+        const existingDiscountType = existingBooking.discount_type || 'none';
+        const effectiveDiscountType = (overrideDiscountType || existingDiscountType || 'none').toLowerCase();
+        const existingDiscountAmount = parseFloat(existingBooking.discount_amount || 0);
+
 
         // Calculate new checkout date
         const newCheckOutDate = addDays(currentCheckOutDate, parseInt(nightsToExtend));
         const newCheckOutDateString = format(newCheckOutDate, 'yyyy-MM-dd HH:mm:ss'); // Format for MySQL DATETIME
 
         // Calculate additional price for extended nights
-        const additionalPrice = parseInt(nightsToExtend) * pricePerNight;
+        const additionalBasePrice = parseInt(nightsToExtend) * pricePerNight;
+        const additionalDiscount = (effectiveDiscountType === 'senior' || effectiveDiscountType === 'repeater')
+            ? additionalBasePrice * 0.10
+            : 0;
+        const additionalNetPrice = additionalBasePrice - additionalDiscount;
+
 
         // Calculate updated total price and amount paid
-        const updatedTotalPrice = currentTotalPrice + additionalPrice;
+        // Calculate updated totals (apply discount to extension portion)
+        const updatedTotalPrice = currentTotalPrice + additionalNetPrice;
         const updatedAmountPaid = currentAmountPaid + parseFloat(paymentAmount);
+        const updatedDiscountAmount = existingDiscountAmount + additionalDiscount;
 
         // Determine new 'isPaid' status
         let newIsPaidStatus;
@@ -1467,9 +1481,11 @@ app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, 
                 isPaid = ?,
                 status = ?,
                 nights = ?,
+                discount_type = ?,
+                discount_amount = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?`,
-            [newCheckOutDateString, updatedTotalPrice, updatedAmountPaid, newIsPaidStatus, newStatus, updatedNights, id]
+            [newCheckOutDateString, updatedTotalPrice, updatedAmountPaid, newIsPaidStatus, newStatus, updatedNights, effectiveDiscountType, updatedDiscountAmount, id]
         );
 
         if (result.affectedRows === 0) {
@@ -1485,7 +1501,9 @@ app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, 
                 amountPaid: updatedAmountPaid,
                 isPaid: newIsPaidStatus,
                 status: newStatus,
-                nights: updatedNights
+                nights: updatedNights,
+                discountAmount: updatedDiscountAmount,
+                discountType: effectiveDiscountType
             }
         });
 
@@ -1498,6 +1516,9 @@ app.patch('/admin/bookings/walk-in/:id/extend', verifyClerkToken, requireAdmin, 
             isPaid: newIsPaidStatus,
             status: newStatus,
             nights: updatedNights,
+            discountAmount: updatedDiscountAmount,
+            discountType: effectiveDiscountType,
+            isWalkIn: true,
             updatedAt: new Date().toISOString()
         });
 
