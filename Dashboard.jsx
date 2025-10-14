@@ -92,6 +92,12 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
     const [verifyError, setVerifyError] = useState(null);
     const [verifyingPayment, setVerifyingPayment] = useState(false);
     const [rejectNote, setRejectNote] = useState('');
+
+    // New: Record Cash Payment modal state for online bookings
+    const [recordCashFor, setRecordCashFor] = useState(null); // booking object
+    const [recordCashAmount, setRecordCashAmount] = useState('');
+    const [recordCashError, setRecordCashError] = useState(null);
+    const [recordingCash, setRecordingCash] = useState(false);
     
     // Robust local datetime formatter for MySQL DATETIME strings
     // Ensures strings like 'YYYY-MM-DD HH:mm:ss' are treated as local time
@@ -559,6 +565,53 @@ const handleCloseVerifyPayment = () => {
         setVerifyAmount('');
         setVerifyError(null);
         setVerifyingPayment(false);
+    };
+
+    // New: Handlers for Record Cash Payment (online)
+    const handleOpenRecordCash = (booking) => {
+        setRecordCashFor(booking);
+        setRecordCashAmount('');
+        setRecordCashError(null);
+        setRecordingCash(false);
+    };
+
+    const handleCloseRecordCash = () => {
+        setRecordCashFor(null);
+        setRecordCashAmount('');
+        setRecordCashError(null);
+        setRecordingCash(false);
+    };
+
+    const handleConfirmRecordCash = async () => {
+        if (!recordCashFor) return;
+        const amount = parseFloat(recordCashAmount);
+        if (isNaN(amount) || amount <= 0) {
+            setRecordCashError('Please enter a valid amount.');
+            return;
+        }
+        const remaining = (parseFloat(recordCashFor.totalPrice) || 0) - (parseFloat(recordCashFor.amountPaid || 0) || 0);
+        if (amount > remaining) {
+            setRecordCashError('Amount cannot exceed remaining balance.');
+            return;
+        }
+        try {
+            setRecordingCash(true);
+            const token = await getToken();
+            await axios.patch(
+                `${BACKEND_URL}/admin/bookings/${recordCashFor.id}/record-payment`,
+                { amountPaid: amount },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            alert('Cash payment recorded.');
+            fetchBookings();
+            fetchDashboardSummary();
+            handleCloseRecordCash();
+        } catch (err) {
+            console.error('Failed to record cash payment:', err.response?.data || err.message);
+            setRecordCashError(err.response?.data?.error || 'Failed to record cash payment.');
+        } finally {
+            setRecordingCash(false);
+        }
     };
 
     const handleConfirmVerifyPayment = async () => {
@@ -1160,13 +1213,22 @@ const handleCloseVerifyPayment = () => {
                                         Extend
                                     </button>
                                 )}
-                                {booking.status === 'approved' && (
+                                {booking.status === 'approved' && booking.paymentStatus !== 'Fully Paid' && (
                                     <button
                                         onClick={() => setVerifyPaymentFor(booking)}
                                         className="text-green-600 hover:text-green-900 mr-2 cursor-pointer"
                                         disabled={loading}
                                     >
                                         Verify Payment
+                                    </button>
+                                )}
+                                {booking.status === 'approved' && booking.paymentStatus !== 'Fully Paid' && (
+                                    <button
+                                        onClick={() => handleOpenRecordCash(booking)}
+                                        className="text-emerald-600 hover:text-emerald-900 mr-2 cursor-pointer"
+                                        disabled={loading}
+                                    >
+                                        Record Cash
                                     </button>
                                 )}
                                 {booking.status === 'approved' && booking.isPaid && (
@@ -2014,6 +2076,50 @@ const handleCloseVerifyPayment = () => {
                                 disabled={verifyingPayment}
                             >
                                 {verifyingPayment ? 'Verifying...' : 'Confirm'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {recordCashFor && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                        <h3 className="text-lg font-semibold mb-4">Record Cash for Booking #{recordCashFor.id}</h3>
+                        <p className="mb-2 text-sm">Guest: <strong>{recordCashFor.user?.firstName || 'N/A'} {recordCashFor.user?.lastName || ''}</strong></p>
+                        <p className="mb-2 text-sm">Total Price: <strong>₱{parseFloat(recordCashFor.totalPrice || 0).toFixed(2)}</strong></p>
+                        <p className="mb-4 text-sm">Amount Already Paid: <strong>₱{parseFloat(recordCashFor.amountPaid || 0).toFixed(2)}</strong></p>
+
+                        <label htmlFor="recordCashAmount" className="block text-sm font-medium text-gray-700 mb-2">
+                            Amount Received (Cash)
+                        </label>
+                        <input
+                            type="number"
+                            id="recordCashAmount"
+                            value={recordCashAmount}
+                            onChange={(e) => setRecordCashAmount(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-emerald-500 focus:border-emerald-500"
+                            placeholder="Enter amount"
+                            min="0.01"
+                            step="0.01"
+                        />
+                        {recordCashError && <p className="text-red-500 text-sm mt-2">{recordCashError}</p>}
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button
+                                type="button"
+                                onClick={handleCloseRecordCash}
+                                className="px-5 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-200 ease-in-out"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmRecordCash}
+                                className="px-5 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition duration-200 ease-in-out"
+                                disabled={recordingCash}
+                            >
+                                {recordingCash ? 'Recording...' : 'Confirm'}
                             </button>
                         </div>
                     </div>
