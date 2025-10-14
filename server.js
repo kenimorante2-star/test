@@ -2086,15 +2086,15 @@ app.post('/check-availability', async (req, res) => {
     console.log(`Checking availability for Room Type ID: ${roomId}, Dates: ${checkInDate} to ${checkOutDate}, Guests: ${guests}`);
 
     try {
-        // 1. Get the total number of physical rooms for this roomTypeId
-        const [physicalRoomsCountResult] = await roomDb.execute(
-            'SELECT COUNT(*) AS totalPhysicalRooms FROM room_management_db.physical_rooms WHERE room_type_id = ?',
+        // 1. Get the total number of AVAILABLE physical rooms for this roomTypeId (exclude maintenance/occupied)
+        const [availableRoomsCountResult] = await roomDb.execute(
+            "SELECT COUNT(*) AS availableRooms FROM room_management_db.physical_rooms WHERE room_type_id = ? AND status = 'available'",
             [roomId]
         );
-        const totalPhysicalRooms = physicalRoomsCountResult[0].totalPhysicalRooms;
+        const availableRoomsTotal = parseInt(availableRoomsCountResult[0].availableRooms, 10) || 0;
 
-        if (totalPhysicalRooms === 0) {
-            return res.json({ available: false, message: 'No rooms exist for this room type.' });
+        if (availableRoomsTotal === 0) {
+            return res.json({ available: false, message: 'No rooms available for this room type at the moment.' });
         }
 
         // 2. Get the number of physical rooms booked for ANY part of the requested date range from both databases.
@@ -2106,7 +2106,7 @@ app.post('/check-availability', async (req, res) => {
                 SELECT b.physical_room_id AS booked_room_alias
                 FROM booking_db.bookings b
                 JOIN room_management_db.physical_rooms pr ON b.physical_room_id = pr.id
-                WHERE pr.room_type_id = ?
+                WHERE pr.room_type_id = ? AND pr.status = 'available'
                 AND (b.checkOutDate > ? AND b.checkInDate < ?)
                 
                 UNION
@@ -2115,7 +2115,7 @@ app.post('/check-availability', async (req, res) => {
                 SELECT b.physicalRoomId AS booked_room_alias
                 FROM walk_in_booking_db.bookings b
                 JOIN room_management_db.physical_rooms pr ON b.physicalRoomId = pr.id
-                WHERE pr.room_type_id = ?
+                WHERE pr.room_type_id = ? AND pr.status = 'available'
                 AND (b.checkOutDateAndTime > ? AND b.checkInDateAndTime < ?)
             ) AS booked_rooms
             `,
@@ -2130,7 +2130,7 @@ app.post('/check-availability', async (req, res) => {
         console.log(`Physical Rooms Booked for requested dates: ${bookedPhysicalRooms}`);
 
         // 3. Calculate actual available physical rooms
-        const availablePhysicalRooms = totalPhysicalRooms - bookedPhysicalRooms;
+        const availablePhysicalRooms = availableRoomsTotal - bookedPhysicalRooms;
 
         if (availablePhysicalRooms > 0) {
             // Further check if the room type can accommodate the number of guests
@@ -2149,12 +2149,12 @@ app.post('/check-availability', async (req, res) => {
                 `
                 SELECT id, room_number
                 FROM room_management_db.physical_rooms
-                WHERE room_type_id = ?
+                WHERE room_type_id = ? AND status = 'available'
                 AND id NOT IN (
                     -- Check online bookings (using physical_room_id and DATE columns)
                     SELECT b.physical_room_id
                     FROM booking_db.bookings b
-                    WHERE b.physical_room_id IN (SELECT id FROM room_management_db.physical_rooms WHERE room_type_id = ?)
+                    WHERE b.physical_room_id IN (SELECT id FROM room_management_db.physical_rooms WHERE room_type_id = ? AND status = 'available')
                     AND (b.checkOutDate > ? AND b.checkInDate < ?)
                     
                     UNION
@@ -2162,7 +2162,7 @@ app.post('/check-availability', async (req, res) => {
                     -- Check walk-in bookings (using physicalRoomId and DATETIME columns)
                     SELECT b.physicalRoomId
                     FROM walk_in_booking_db.bookings b
-                    WHERE b.physicalRoomId IN (SELECT id FROM room_management_db.physical_rooms WHERE room_type_id = ?)
+                    WHERE b.physicalRoomId IN (SELECT id FROM room_management_db.physical_rooms WHERE room_type_id = ? AND status = 'available')
                     AND (b.checkOutDateAndTime > ? AND b.checkInDateAndTime < ?)
                 )
                 `,
@@ -2179,7 +2179,7 @@ app.post('/check-availability', async (req, res) => {
                 availablePhysicalRooms: availablePhysicalRoomsDetails
             });
         } else {
-            res.json({ available: false, message: 'All physical rooms for this type are booked for these dates.' });
+            res.json({ available: false, message: 'No rooms available for the selected dates.' });
         }
 
     } catch (err) {
