@@ -1,5 +1,6 @@
 // src/pages/User/MyBookings.jsx
 import React, { useEffect, useState, useCallback } from 'react';
+import { differenceInDays } from 'date-fns';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { assets } from '../assets/assets'; // Adjust path if necessary
@@ -291,6 +292,12 @@ const MyBookings = () => {
                                     : `${BACKEND_URL}/uploads/room_images/${firstImg}`))
                             : assets.placeholder_room_image;
 
+                        const startForNights = booking.checkInDateAndTime || booking.checkInDate;
+                        const endForNights = booking.checkOutDateAndTime || booking.checkOutDate;
+                        const computedNights = (startForNights && endForNights)
+                            ? differenceInDays(new Date(endForNights), new Date(startForNights))
+                            : (typeof booking.nights === 'number' ? booking.nights : null);
+
                         return (
                             <div key={booking.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
                                 <img
@@ -312,7 +319,7 @@ const MyBookings = () => {
                                     </p>
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-moon mr-2"></i>
-                                        Nights: {booking.nights}
+                                        Nights: {computedNights ?? 'N/A'}
                                     </p>
 
                                     {showDetails[booking.id] && (
