@@ -282,23 +282,33 @@ const MyBookings = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {bookings.map((booking) => {
-                        const displayImage = booking.roomImages && booking.roomImages.length > 0
-                            ? `${BACKEND_URL}${booking.roomImages[0]}`
+                        const firstImg = booking.roomImages && booking.roomImages.length > 0 ? booking.roomImages[0] : null;
+                        const displayImage = firstImg
+                            ? (firstImg.startsWith('http')
+                                ? firstImg
+                                : (firstImg.startsWith('/')
+                                    ? `${BACKEND_URL}${firstImg}`
+                                    : `${BACKEND_URL}/uploads/room_images/${firstImg}`))
                             : assets.placeholder_room_image;
 
                         return (
                             <div key={booking.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
-                                <img src={displayImage} alt={booking.roomType} className="w-full h-48 object-cover" />
+                                 <img
+                                    src={displayImage}
+                                    alt={booking.roomType}
+                                    className="w-full h-48 object-cover"
+                                    onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = assets.placeholder_room_image; }}
+                                />
                                 <div className="p-4">
                                     <h3 className="text-xl font-playfair text-gray-800 mb-2">{booking.roomType}</h3>
                                     
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-calendar-alt mr-2"></i>
-                                        Check-in: {new Date(booking.checkInDateAndTime).toLocaleDateString()}
+                                        Check-in: {new Date(booking.checkInDate).toLocaleDateString()}
                                     </p>
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-calendar-alt mr-2"></i>
-                                        Check-out: {new Date(booking.checkOutDateAndTime).toLocaleDateString()}
+                                        Check-out: {new Date(booking.checkOutDate).toLocaleDateString()}
                                     </p>
                                     <p className="text-gray-600 text-sm mb-1">
                                         <i className="fas fa-moon mr-2"></i>
